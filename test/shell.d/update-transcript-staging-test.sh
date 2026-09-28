@@ -4,29 +4,28 @@ set -euo pipefail
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 
-tmp_dir=$(mktemp -d)
-trap 'rm -rf "$tmp_dir"' EXIT
+source "$SHELL_TEST_DIR/fixtures/sudo-boundary-test.sh"
+copy_boundary_file bin/omarchy-update
+tmp_dir="$boundary_tmp"
+mkdir -p "$tmp_dir/run"
 
-stub_bin="$tmp_dir/bin"
-mkdir -p "$stub_bin" "$tmp_dir/run" "$tmp_dir/home"
-
-# omarchy-update re-execs itself through script(1) before it does anything
-# else, so a stub that records the transcript path and exits exercises the
-# wrapper without running an update.
-cat >"$stub_bin/script" <<'SH'
+# omarchy-update re-execs itself through script(1) from its fixed PATH, so the
+# stub goes in the boundary tree. It records the transcript path and exits,
+# which exercises the wrapper without running an update.
+cat >"$SUDO_TEST_ROOT/bin/script" <<'SH'
 #!/bin/bash
 printf '%s' "${@: -1}" >"$OMARCHY_TEST_TRANSCRIPT_PATH"
 exit 0
 SH
-chmod +x "$stub_bin/script"
+chmod +x "$SUDO_TEST_ROOT/bin/script"
 
-export PATH="$stub_bin:$ROOT/bin:$PATH"
-export HOME="$tmp_dir/home"
+# The boundary copy of omarchy-update reads $SUDO_TEST_HOME for $HOME.
+export HOME="$SUDO_TEST_HOME"
 export XDG_RUNTIME_DIR="$tmp_dir/run"
 export OMARCHY_TEST_TRANSCRIPT_PATH="$tmp_dir/transcript-path"
-unset XDG_STATE_HOME
+unset XDG_STATE_HOME OMARCHY_UPDATE_LOGGED
 
-"$ROOT/bin/omarchy-update" >/dev/null 2>&1
+"$SUDO_TEST_ROOT/bin/omarchy-update" >/dev/null 2>&1
 
 transcript=$(<"$OMARCHY_TEST_TRANSCRIPT_PATH")
 
@@ -45,7 +44,7 @@ pass "the transcript is readable only by its owner"
 
 # Without a session runtime dir the transcript falls back to the state
 # directory, and omarchy-update-analyze-logs must resolve to the same file.
-env -u XDG_RUNTIME_DIR "$ROOT/bin/omarchy-update" >/dev/null 2>&1
+env -u XDG_RUNTIME_DIR "$SUDO_TEST_ROOT/bin/omarchy-update" >/dev/null 2>&1
 
 transcript=$(<"$OMARCHY_TEST_TRANSCRIPT_PATH")
 
